@@ -1,7 +1,7 @@
 #ifndef SQLCONNPOOL_H
 #define SQLCONNPOOL_H
 
-#include "../locker.h"
+#include "../sync.h"
 #include <error.h>
 #include <iostream>
 #include <list>
