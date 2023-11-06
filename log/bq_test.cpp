@@ -1,9 +1,9 @@
-#include "block_queue.h"
+#include "BlockQueue.h"
 #include <iostream>
 #include <pthread.h>
 #include <unistd.h>
 
-block_queue<int> bq(10);
+BlockQueue<int> bq(10);
 
 void *run(void *) {
     sleep(1); // 先让main 线程添加元素

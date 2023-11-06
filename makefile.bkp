@@ -1,0 +1,6 @@
+server: main.c ./threadpool/ThreadPool.h ./http/HttpConn.cpp ./http/HttpConn.h ./sync.h ./log/Log.cpp ./log/Log.h ./log/BlockQueue.h ./CGImysql/ConnPool.cpp ./CGImysql/ConnPool.h 
+	g++ -o server main.c ./threadpool/ThreadPool.h ./http/HttpConn.cpp ./http/HttpConn.h ./sync.h ./log/Log.cpp ./log/Log.h ./log/BlockQueue.h ./CGImysql/ConnPool.cpp ./CGImysql/ConnPool.h -lpthread -lmysqlclient -g
+
+
+clean:
+	rm  -r server
