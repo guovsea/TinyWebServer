@@ -1,4 +1,4 @@
-#include "sqlConnPool.h"
+#include "ConnPool.h"
 #include <iostream>
 #include <list>
 #include <mysql/mysql.h>
@@ -10,7 +10,7 @@
 
 using namespace std;
 
-SqlConnPool::SqlConnPool() {
+ConnPool::ConnPool() {
     this->CurConn = 0;
     this->FreeConn = 0;
 }
@@ -25,7 +25,7 @@ SqlConnPool::SqlConnPool() {
  * @param DBName   数据库名
  * @param maxConn  最大连接数
  */
-void SqlConnPool::init(string host, int port, string user, string password,
+void ConnPool::init(string host, int port, string user, string password,
                        string DBName, unsigned int maxConn) {
     this->host_ = host;
     this->port_ = port;
@@ -62,7 +62,7 @@ void SqlConnPool::init(string host, int port, string user, string password,
 }
 
 // 当有请求时，从数据库连接池中返回一个可用连接，更新使用和空闲连接数
-MYSQL *SqlConnPool::GetConn() {
+MYSQL *ConnPool::GetConn() {
     MYSQL *conn = NULL;
 
     if (0 == connList.size())
@@ -83,7 +83,7 @@ MYSQL *SqlConnPool::GetConn() {
 }
 
 // 释放当前使用的连接
-bool SqlConnPool::ReleaseConn(MYSQL *con) {
+bool ConnPool::ReleaseConn(MYSQL *con) {
     if (NULL == con)
         return false;
 
@@ -100,7 +100,7 @@ bool SqlConnPool::ReleaseConn(MYSQL *con) {
 }
 
 // 销毁数据库连接池
-void SqlConnPool::DestroyPool() {
+void ConnPool::DestroyPool() {
 
     lock.lock();
     if (connList.size() > 0) {
@@ -120,11 +120,11 @@ void SqlConnPool::DestroyPool() {
 }
 
 // 当前空闲的连接数
-int SqlConnPool::GetFreeConn() { return this->FreeConn; }
+int ConnPool::GetFreeConn() { return this->FreeConn; }
 
-SqlConnPool::~SqlConnPool() { DestroyPool(); }
+ConnPool::~ConnPool() { DestroyPool(); }
 
-ConnRAII::ConnRAII(MYSQL **SQL, SqlConnPool *connPool) {
+ConnRAII::ConnRAII(MYSQL **SQL, ConnPool *connPool) {
     *SQL = connPool->GetConn();
 
     conn = *SQL;

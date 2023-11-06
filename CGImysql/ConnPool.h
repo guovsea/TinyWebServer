@@ -1,5 +1,5 @@
-#ifndef SQLCONNPOOL_H
-#define SQLCONNPOOL_H
+#ifndef CONNPOOL_H
+#define CONNPOOL_H
 
 #include "../sync.h"
 #include <error.h>
@@ -12,7 +12,7 @@
 
 using namespace std;
 
-class SqlConnPool {
+class ConnPool {
   public:
     MYSQL *GetConn();              // 获取数据库连接
     bool ReleaseConn(MYSQL *conn); // 释放连接
@@ -20,18 +20,18 @@ class SqlConnPool {
     void DestroyPool();            // 销毁所有连接
 
     // 单例模式
-    static SqlConnPool *instance() {
-        static SqlConnPool connPool;
+    static ConnPool *instance() {
+        static ConnPool connPool;
         return &connPool;
     }
 
     void init(string url, int Port, string User, string PassWord,
               string DataBaseName, unsigned int MaxConn);
 
-    ~SqlConnPool();
+    ~ConnPool();
 
   private:
-    SqlConnPool();
+    ConnPool();
     unsigned int MaxConn;  // 最大连接数
     unsigned int CurConn;  // 当前已使用的连接数
     unsigned int FreeConn; // 当前空闲的连接数
@@ -52,12 +52,12 @@ class SqlConnPool {
 class ConnRAII {
 
   public:
-    ConnRAII(MYSQL **conn, SqlConnPool *connPool);
+    ConnRAII(MYSQL **conn, ConnPool *connPool);
     ~ConnRAII();
 
   private:
     MYSQL *conn;
-    SqlConnPool *pool;
+    ConnPool *pool;
 };
 
-#endif /* SQLCONNPOOL_H */
+#endif /* CONNPOOL_H */
