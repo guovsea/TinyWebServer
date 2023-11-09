@@ -1,5 +1,6 @@
-#include "HttpConn.h"
-#include "../log/Log.h"
+#include "../inc/HttpConn.h"
+#include "../inc/Log.h"
+#include "../inc/sync.h"
 #include <fstream>
 #include <map>
 #include <mysql/mysql.h>
@@ -30,7 +31,7 @@ const char *doc_root = "/home/guo/webserver/TinyWebServer/root";
 
 // 将表中的用户名和密码放入map
 map<string, string> users;
-MutexLock lock_;
+MutexLock m_lock;
 
 void HttpConn::initmysql_result(ConnPool *connPool) {
     // 先从连接池中取一个连接
@@ -67,8 +68,8 @@ int setnonblocking(int fd) {
     return old_option;
 }
 
-// 将 fd  添加到 epfd 的监听集合中, 是否开启 EPOLLONESHOT
-void addfd(int epfd, int fd, bool one_shot) {
+// 将内核事件表注册读事件，ET模式，选择开启EPOLLONESHOT
+void addfd(int epollfd, int fd, bool one_shot) {
     epoll_event event;
     event.data.fd = fd;
 
@@ -90,18 +91,18 @@ void addfd(int epfd, int fd, bool one_shot) {
 
     if (one_shot)
         event.events |= EPOLLONESHOT;
-    epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
+    epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
     setnonblocking(fd);
 }
 
 // 从内核时间表删除描述符
-void removefd(int epfd, int fd) {
-    epoll_ctl(epfd, EPOLL_CTL_DEL, fd, 0);
+void removefd(int epollfd, int fd) {
+    epoll_ctl(epollfd, EPOLL_CTL_DEL, fd, 0);
     close(fd);
 }
 
 // 将事件重置为EPOLLONESHOT
-void modfd(int epfd, int fd, int ev) {
+void modfd(int epollfd, int fd, int ev) {
     epoll_event event;
     event.data.fd = fd;
 
@@ -113,7 +114,7 @@ void modfd(int epfd, int fd, int ev) {
     event.events = ev | EPOLLONESHOT | EPOLLRDHUP;
 #endif
 
-    epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &event);
+    epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &event);
 }
 
 int HttpConn::user_count_ = 0;
@@ -142,7 +143,7 @@ void HttpConn::init(int sockfd, const sockaddr_in &addr) {
 // 初始化新接受的连接
 // check_state默认为分析请求行状态
 void HttpConn::init() {
-    mysql = NULL;
+    mysql_ = NULL;
     bytes_to_send = 0;
     bytes_have_send = 0;
     check_state_ = CHECK_STATE_REQUESTLINE;
@@ -156,14 +157,14 @@ void HttpConn::init() {
     checked_idx_ = 0;
     read_idx_ = 0;
     write_idx_ = 0;
-    cgi = 0;
+    cgi_ = 0;
     memset(read_buf_, '\0', READ_BUFFER_SIZE);
     memset(write_buf_, '\0', WRITE_BUFFER_SIZE);
     memset(real_file_, '\0', FILENAME_LEN);
 }
 
 // 从状态机，用于分析出一行内容
-// 返回值为行的读取状态，有LINE_OK,LINE_BAD,LINE_OPEN(不完整)
+// 返回值为行的读取状态，有LINE_OK,LINE_BAD,LINE_OPEN
 HttpConn::LINE_STATUS HttpConn::parse_line() {
     char temp;
     for (; checked_idx_ < read_idx_; ++checked_idx_) {
@@ -214,7 +215,7 @@ bool HttpConn::read_once() {
 
 #ifdef connfdET
     while (true) {
-        bytes_read = recv(sockfd_, read_buf_ + read_idx_,
+        bytes_read = recv(m_sockfd, read_buf_ + read_idx_,
                           READ_BUFFER_SIZE - read_idx_, 0);
         if (bytes_read == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -241,7 +242,7 @@ HttpConn::HTTP_CODE HttpConn::parse_request_line(char *text) {
         method_ = GET;
     else if (strcasecmp(method, "POST") == 0) {
         method_ = POST;
-        cgi = 1;
+        cgi_ = 1;
     } else
         return BAD_REQUEST;
     url_ += strspn(url_, " \t");
@@ -295,7 +296,7 @@ HttpConn::HTTP_CODE HttpConn::parse_headers(char *text) {
         host_ = text;
     } else {
         // printf("oop!unknow header: %s\n",text);
-        LOG_INFO("unknow header: %s", text);
+        LOG_INFO("oop!unknow header: %s", text);
         Log::instance()->flush();
     }
     return NO_REQUEST;
@@ -317,15 +318,12 @@ HttpConn::HTTP_CODE HttpConn::process_read() {
     LINE_STATUS line_status = LINE_OK;
     HTTP_CODE ret = NO_REQUEST;
     char *text = 0;
-    // 状态为解析消息体时，因为消息体不会以"\r\n"结尾。因此，parse_line()不会返回
-    // LINE_OK 应该使用上一次 parse_line()的结果。即：在解析Header时只要
-    // parse_line == LINE_OK 就继续解析
+
     while ((check_state_ == CHECK_STATE_CONTENT && line_status == LINE_OK) ||
            ((line_status = parse_line()) == LINE_OK)) {
-        std::cout << "DBG:parse once ..." << std::endl;
         text = get_line();
         start_line_ = checked_idx_;
-        LOG_INFO("%s", text);
+        LOG_INFO("------%s--------", text);
         Log::instance()->flush();
         switch (check_state_) {
         case CHECK_STATE_REQUESTLINE: {
@@ -364,16 +362,16 @@ HttpConn::HTTP_CODE HttpConn::do_request() {
     const char *p = strrchr(url_, '/');
 
     // 处理cgi
-    if (cgi == 1 && (*(p + 1) == '2' || *(p + 1) == '3')) {
+    if (cgi_ == 1 && (*(p + 1) == '2' || *(p + 1) == '3')) {
 
         // 根据标志判断是登录检测还是注册检测
         char flag = url_[1];
 
-        char *url_real = (char *)malloc(sizeof(char) * 200);
-        strcpy(url_real, "/");
-        strcat(url_real, url_ + 2);
-        strncpy(real_file_ + len, url_real, FILENAME_LEN - len - 1);
-        free(url_real);
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/");
+        strcat(m_url_real, url_ + 2);
+        strncpy(real_file_ + len, m_url_real, FILENAME_LEN - len - 1);
+        free(m_url_real);
 
         // 将用户名和密码提取出来
         // user=123&passwd=123
@@ -402,10 +400,10 @@ HttpConn::HTTP_CODE HttpConn::do_request() {
 
             if (users.find(name) == users.end()) {
 
-                lock_.lock();
-                int res = mysql_query(mysql, sql_insert);
+                m_lock.lock();
+                int res = mysql_query(mysql_, sql_insert);
                 users.insert(pair<string, string>(name, password));
-                lock_.unlock();
+                m_lock.unlock();
 
                 if (!res)
                     strcpy(url_, "/log.html");
@@ -425,40 +423,39 @@ HttpConn::HTTP_CODE HttpConn::do_request() {
     }
 
     if (*(p + 1) == '0') {
-        char *url_real = (char *)malloc(sizeof(char) * 200);
-        strcpy(url_real, "/register.html");
-        strncpy(real_file_ + len, url_real, strlen(url_real));
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/register.html");
+        strncpy(real_file_ + len, m_url_real, strlen(m_url_real));
 
-        free(url_real);
+        free(m_url_real);
     } else if (*(p + 1) == '1') {
-        char *url_real = (char *)malloc(sizeof(char) * 200);
-        strcpy(url_real, "/log.html");
-        strncpy(real_file_ + len, url_real, strlen(url_real));
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/log.html");
+        strncpy(real_file_ + len, m_url_real, strlen(m_url_real));
 
-        free(url_real);
+        free(m_url_real);
     } else if (*(p + 1) == '5') {
-        char *url_real = (char *)malloc(sizeof(char) * 200);
-        strcpy(url_real, "/picture.html");
-        strncpy(real_file_ + len, url_real, strlen(url_real));
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/picture.html");
+        strncpy(real_file_ + len, m_url_real, strlen(m_url_real));
 
-        free(url_real);
+        free(m_url_real);
     } else if (*(p + 1) == '6') {
-        char *url_real = (char *)malloc(sizeof(char) * 200);
-        strcpy(url_real, "/video.html");
-        strncpy(real_file_ + len, url_real, strlen(url_real));
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/video.html");
+        strncpy(real_file_ + len, m_url_real, strlen(m_url_real));
 
-        free(url_real);
+        free(m_url_real);
     } else if (*(p + 1) == '7') {
-        char *url_real = (char *)malloc(sizeof(char) * 200);
-        strcpy(url_real, "/fans.html");
-        strncpy(real_file_ + len, url_real, strlen(url_real));
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/fans.html");
+        strncpy(real_file_ + len, m_url_real, strlen(m_url_real));
 
-        free(url_real);
+        free(m_url_real);
     } else
         strncpy(real_file_ + len, url_, FILENAME_LEN - len - 1);
 
     if (stat(real_file_, &file_stat_) < 0)
-                std::cout << "DBG:" << "No Resource" << endl;
         return NO_RESOURCE;
     if (!(file_stat_.st_mode & S_IROTH))
         return FORBIDDEN_REQUEST;
@@ -478,7 +475,6 @@ void HttpConn::unmap() {
 }
 
 bool HttpConn::write() {
-    std::cout << "DBG:write" << __FILE__ << __LINE__ << endl;
     int temp = 0;
 
     if (bytes_to_send == 0) {
@@ -501,7 +497,6 @@ bool HttpConn::write() {
 
         bytes_have_send += temp;
         bytes_to_send -= temp;
-        // 根据写入的字节数，更新iov
         if (bytes_have_send >= iv_[0].iov_len) {
             iv_[0].iov_len = 0;
             iv_[1].iov_base = file_address_ + (bytes_have_send - write_idx_);
@@ -549,7 +544,6 @@ bool HttpConn::add_headers(int content_len) {
     add_content_length(content_len);
     add_linger();
     add_blank_line();
-    return true;
 }
 bool HttpConn::add_content_length(int content_len) {
     return add_response("Content-Length:%d\r\n", content_len);
@@ -566,7 +560,7 @@ bool HttpConn::add_content(const char *content) {
     return add_response("%s", content);
 }
 bool HttpConn::process_write(HTTP_CODE ret) {
-            std::cout << "DBG:" << ret << endl;
+    std::cout << "DBG:" << ret << endl;
     switch (ret) {
     case INTERNAL_ERROR: {
         add_status_line(500, error_500_title);
@@ -608,7 +602,6 @@ bool HttpConn::process_write(HTTP_CODE ret) {
         }
     }
     default:
-        std::cout << "DBG:" << "default" << endl;
         return false;
     }
     iv_[0].iov_base = write_buf_;
@@ -620,16 +613,12 @@ bool HttpConn::process_write(HTTP_CODE ret) {
 void HttpConn::process() {
     HTTP_CODE read_ret = process_read();
     if (read_ret == NO_REQUEST) {
-        // 请求不完整，需要继续读取请求报文数据
         modfd(epfd_, sockfd_, EPOLLIN);
         return;
     }
-    std::cout << "DBG:read_ret = " << read_ret << endl;
-    std::cout << "DBG:process" << __FILE__ << __LINE__ << endl;
     bool write_ret = process_write(read_ret);
     if (!write_ret) {
         close_conn();
-    std::cout << "DBG:close_conn" << __FILE__ << __LINE__ << endl;
     }
     modfd(epfd_, sockfd_, EPOLLOUT);
 }

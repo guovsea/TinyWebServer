@@ -86,7 +86,7 @@ template <typename T> void ThreadPool<T>::run() {
         if (!request)
             continue;
 
-        ConnRAII(&request->mysql, conn_pool_);
+        ConnRAII(&request->mysql_, conn_pool_);
 
         request->process();
     }

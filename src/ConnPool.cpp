@@ -1,4 +1,4 @@
-#include "ConnPool.h"
+#include "../inc/ConnPool.h"
 #include <iostream>
 #include <list>
 #include <mysql/mysql.h>
@@ -25,8 +25,8 @@ ConnPool::ConnPool() {
  * @param port     端口号
  * @param maxConn  最大连接数
  */
-void ConnPool::init(string host,string user, string password,
-                       string DBName, int port,  unsigned int maxConn) {
+void ConnPool::init(string host, string user, string password, string DBName,
+                    int port, unsigned int maxConn) {
     this->host_ = host;
     this->port_ = port;
     this->user_ = user;

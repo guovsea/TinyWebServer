@@ -1,4 +1,4 @@
-#include "Log.h"
+#include "../inc/Log.h"
 #include <cstdio>
 #include <pthread.h>
 #include <stdarg.h>

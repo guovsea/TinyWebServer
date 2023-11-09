@@ -163,8 +163,8 @@ template <class T> class BlockQueue {
 
   private:
     MutexLock mutex_;
-    Condition queue_not_empty_;   // pop 时需要等待队列不空的条件成立
-    Condition queue_not_full_;    // push 时需要等待队列不满的条件成立
+    Condition queue_not_empty_; // pop 时需要等待队列不空的条件成立
+    Condition queue_not_full_; // push 时需要等待队列不满的条件成立
 
     T *queue_;
     int size_;

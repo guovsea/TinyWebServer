@@ -24,7 +24,7 @@ class Log {
 
     static void *flush_log_thread(void *args) {
         Log::instance()->async_write_log();
-        return NULL;
+        return args;
     }
     // 可选择的参数有日志文件、日志缓冲区大小、最大行数以及最长日志条队列
     /**
@@ -63,12 +63,12 @@ class Log {
     char log_name[LOG_NAME_LEN]; // log文件名
     int split_lines_;            // 单个日志文件最大行数
     int log_buf_size_;           // 日志缓冲区大小
-    long long count_;            // 日志行数记录
+    long long count_;            // 日志总行数记录
     int today_;                  // 按天分类,记录当前时间是那一天
     FILE *fp_;                   // 打开log的文件指针
     char *buf_;
     BlockQueue<string> *log_queue_; // 阻塞队列
-    bool is_async_;                  // 是否异步标志位
+    bool is_async_;                 // 是否异步标志位
     MutexLock mutex_;
 };
 
